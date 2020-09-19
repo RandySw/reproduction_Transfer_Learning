@@ -10,6 +10,7 @@ import torchvision.transforms as transforms
 
 # %% DaNN
 class FeatureExtractor(nn.Module):
+
     def __init__(self, number_of_classes):
         super(FeatureExtractor, self).__init__()
         self.conv = nn.Sequential(
@@ -45,6 +46,7 @@ class FeatureExtractor(nn.Module):
 
 
 class DomainClassifier(nn.Module):
+
     def __init__(self):
         super(DomainClassifier, self).__init__()
         self.layer = nn.Sequential(
@@ -81,6 +83,7 @@ class DomainClassifier(nn.Module):
 
 
 class LabelPredictor(nn.Module):
+
     def __init__(self, number_of_classes):
         super(LabelPredictor, self).__init__()
         self.layer = nn.Sequential(
@@ -107,5 +110,13 @@ class LabelPredictor(nn.Module):
                 m.bais.data.zero_()
 
 
-# %%
+# %% Pre-processing
+
+
+
+
+
+
+
+
 
