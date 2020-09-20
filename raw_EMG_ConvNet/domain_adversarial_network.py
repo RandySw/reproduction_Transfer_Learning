@@ -11,20 +11,20 @@ import torchvision.transforms as transforms
 # %% DaNN
 class FeatureExtractor(nn.Module):
 
-    def __init__(self, number_of_classes):
+    def __init__(self, number_of_classes, ):
         super(FeatureExtractor, self).__init__()
         self.conv = nn.Sequential(
              nn.Conv2d(1, 32, kernel_size=(3, 5)),
              nn.BatchNorm2d(32),
              nn.PReLU(32),
-             nn.Dropout(0.5),
+             nn.Dropout2d(0.5),
 
              nn.MaxPool2d(kernel_size=(1, 3)),
 
              nn.Conv2d(32, 64, kernel_size=(3, 5)),
              nn.BatchNorm2d(64),
              nn.PReLU(64),
-             nn.Dropout(0.5),
+             nn.Dropout2d(0.5),
 
              nn.MaxPool2d(kernel_size=(1, 3)),
          )
@@ -39,10 +39,10 @@ class FeatureExtractor(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 torch.nn.init.kaiming_normal_(m.weight)
-                m.bais.data.zero_()
+                m.bias.data.zero_()
             elif isinstance(m, nn.Linear):
                 torch.nn.init.kaiming_normal_(m.weight)
-                m.bais.data.zero_()
+                m.bias.data.zero_()
 
 
 class DomainClassifier(nn.Module):
@@ -79,13 +79,14 @@ class DomainClassifier(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 torch.nn.init.kaiming_normal_(m.weight)
-                m.bais.data.zero_()
+                m.bias.data.zero_()
 
 
 class LabelPredictor(nn.Module):
 
-    def __init__(self, number_of_classes):
+    def __init__(self, number_of_classes,):
         super(LabelPredictor, self).__init__()
+
         self.layer = nn.Sequential(
             nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
@@ -107,14 +108,21 @@ class LabelPredictor(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 torch.nn.init.kaiming_normal_(m.weight)
-                m.bais.data.zero_()
+                m.bias.data.zero_()
 
 
 # %% Pre-processing
 
 
+if __name__ == '__main__':
+    # init network components
+    feature_extractor = FeatureExtractor(number_of_classes=10).cuda()
+    label_predictor = LabelPredictor(number_of_classes=10).cuda()
+    domain_classifier = DomainClassifier().cuda()
 
-
+    print(feature_extractor)
+    print(label_predictor)
+    print(domain_classifier)
 
 
 

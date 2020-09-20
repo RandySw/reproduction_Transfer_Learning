@@ -57,9 +57,11 @@ class Net(nn.Module):
             if isinstance(m, nn.Conv2d):
                 torch.nn.init.kaiming_normal_(m.weight)
                 m.bias.data.zero_()
+                # print('conv')
             elif isinstance(m, nn.Linear):
                 torch.nn.init.kaiming_normal_(m.weight)
                 m.bias.data.zero_()
+                # print('linear')
 
 
 if __name__ == '__main__':
