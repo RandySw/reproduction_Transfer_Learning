@@ -7,6 +7,8 @@ from torch.autograd import Function
 
 import torchvision.transforms as transforms
 
+import time
+
 from domain_adversarial_network import FeatureExtractor, LabelPredictor, DomainClassifier
 
 
@@ -64,29 +66,63 @@ def train_evaluate_model(source_data_training, source_labels_training,
     list_validation_dataloader = []
     human_number = 0
 
+    # source set - training & validation data -> 3/4 training 1/4 validation
     for j in range(19):
-        examples_personne_training = []
-        labels_gesture_personne_training = []
-        labels_human_personne_training = []
+        source_examples_personne_training = []
+        source_labels_personne_training = []
+        source_labels_human_personne_training = []
 
-        examples_personne_valid = []
-        labels_gesture_personne_valid = []
-        labels_human_personne_valid = []
+        source_examples_personne_valid = []
+        source_labels_personne_valid = []
+        source_labels_human_personne_valid = []
 
-        for k in range(len(source_data_training)):
+        # print(np.shape(source_data_training))
+        # time.sleep(1000)
+        for k in range(len(source_data_training[j])):
             # 前 3个cycle 的数据用作train
             if k < 21:
-                examples_personne_training.extend(source_data_training[j][k])
-                labels_gesture_personne_training.extend(source_labels_training[j][k])
-                labels_human_personne_training.extend((human_number * np.ones(len(source_labels_training))))
+                source_examples_personne_training.extend(source_data_training[j][k])
+                source_labels_personne_training.extend(source_labels_training[j][k])
+                source_labels_human_personne_training.extend((human_number * np.ones(len(source_labels_training[j][k]))))
             # 最后 1个cycle 的数据用作valid
             else:
-                examples_personne_valid.extend(source_data_training[j][k])
-                labels_gesture_personne_valid.extend(source_labels_training[j][k])
-                labels_human_personne_valid.extend(human_number * np.ones(len(source_labels_training[j][k])))
+                source_examples_personne_valid.extend(source_data_training[j][k])
+                source_labels_personne_valid.extend(source_labels_training[j][k])
+                source_labels_human_personne_valid.extend(human_number * np.ones(len(source_labels_training[j][k])))
 
-        print(np.shape(examples_personne_training))
-        print(np.shape(examples_personne_valid))
+        human_number += 1
+        print('source_examples_personne_training:   ', np.shape(source_examples_personne_training))
+        print('source_examples_personne_valid:      ', np.shape(source_examples_personne_valid))
+
+    print('-' * 50)
+
+    human_number = 0
+    # target set - training & validation data -> 3/4 training 1/4 validation
+    for j in range(17):
+        target_examples_personne_training = []
+        target_labels_personne_training = []
+        target_labels_human_personne_training = []
+
+        target_examples_personne_valid = []
+        target_labels_personne_valid = []
+        target_labels_human_personne_valid = []
+
+        for k in range(len(target_data_training[j])):
+            if k < 21:
+                target_examples_personne_training.extend(target_data_training[j][k])
+                target_labels_personne_training.extend(target_labels_training[j][k])
+                target_labels_human_personne_training.extend(human_number * np.ones(len(target_labels_training[j][k])))
+            else:
+                target_examples_personne_valid.extend(target_data_training[j][k])
+                target_labels_personne_valid.extend(target_labels_training[j][k])
+                target_labels_human_personne_valid.extend((human_number * np.ones(len(target_labels_training[j][k]))))
+
+        human_number += 1
+        print('target_examples_personne_training:   ', np.shape(target_examples_personne_training))
+        print('target_examples_personne_valid:      ', np.shape(target_examples_personne_valid))
+
+
+
 
 
 
@@ -140,9 +176,9 @@ target_data_test1, target_labels_test1 = target_set_test1
 
 
 number_of_training_cycles = 4
-number_of_training_repetitions = 5
+number_of_training_repetitions = 1
 learning_rate = 0.001
-for training_cycle in range(2):
+for training_cycle in range(1):
     test_0 = []
     test_1 = []
 
