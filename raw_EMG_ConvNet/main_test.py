@@ -163,7 +163,7 @@ print('Loading target training data finished.\n\n')
 # %% Network initialization
 # net = DaNNet(number_of_classes=7)
 best_loss = float('inf')
-num_epochs = 300
+num_epochs = 10
 criterion = nn.CrossEntropyLoss(reduction='sum')
 # optimizer = optim.Adam(net.parameters(), lr=0.001)
 precision = 1e-8
@@ -198,8 +198,9 @@ for target_subject_train_loader, target_subject_valid_loader in zip(list_target_
 
     for epoch in range(num_epochs):
         epoch_start = time.time()
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 20)
+        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+
 
         for phase in ['train', 'valid']:
             if phase == 'train':
@@ -211,14 +212,15 @@ for target_subject_train_loader, target_subject_valid_loader in zip(list_target_
                 domain_classifier.train(False)
                 label_predictor.train(False)
 
-            running_D_loss, running_F_loss = 0.0, 0.0
             total_hit, total_num = 0.0, 0.0
             source_total_hit, target_total_hit = 0.0, 0.0
-            source_total_num, target_total_num = 0.0, 0.0
+            # source_total_num, target_total_num = 0.0, 0.0
+
 
             running_loss = 0.
             running_corrects = 0
             total = 0
+
             # get a random order for the source training subject
             random_vec = np.arange(len(source_train_dataloaders[phase]))  # len(random_vec) = 19
             np.random.seed(0)
@@ -226,8 +228,16 @@ for target_subject_train_loader, target_subject_valid_loader in zip(list_target_
 
             # 遍历 source domain 的每个subject dataloader
             for dataset_index in random_vec:
-                loss_over_datasets = 0.
-                correct_over_datasets = 0.
+                loss_over_batches = 0.
+                batch_D_loss, batch_F_loss = 0.0, 0.0
+
+                correct_over_batches = 0.
+                correct_source_over_batches, correct_target_over_batches = 0., 0.
+
+                total_source_num, total_target_num = 0.0, 0.0
+
+                running_D_loss, running_F_loss = 0.0, 0.0
+                running_source_corrects, running_target_corrects = 0.0, 0.0
 
                 # traversal all source training dataloader
                 # 这里使用了 enumerate 直接遍历了dataloader中的每个batch
@@ -248,20 +258,19 @@ for target_subject_train_loader, target_subject_valid_loader in zip(list_target_
 
                         # train Domain Classifier
                         feature = feature_extractor(mixed_data)  # [512, 64, 4, 4]
-                        # print(feature.shape)
-                        # time.sleep(1000)
                         domain_logits = domain_classifier(feature.detach())
                         loss = domain_criterion(domain_logits, domain_label)
-                        running_D_loss += loss.item()
+                        # running_D_loss += loss.item()
                         loss.backward()
                         optimizer_D.step()
 
                         # train Feature Extractor and Domain Classifier
                         class_logits = label_predictor(feature[:source_data.shape[0]])
                         domain_logits = domain_classifier(feature)
+                        # loss 包括 source data 的 label loss 以及 source data 和 target data 的 domain loss
                         loss = class_criterion(class_logits, source_label) - lamb * domain_criterion(domain_logits,
                                                                                                      domain_label)
-                        running_F_loss += loss.item()
+                        # running_F_loss += loss.item()
                         loss.backward()
                         optimizer_F.step()
                         optimizer_C.step()
@@ -270,17 +279,22 @@ for target_subject_train_loader, target_subject_valid_loader in zip(list_target_
                         optimizer_F.zero_grad()
                         optimizer_C.zero_grad()
 
-                        total_hit += torch.sum(torch.argmax(class_logits, dim=1) == source_label).item()
+                        loss_over_batches += loss
+                        correct_over_batches += torch.sum(torch.argmax(class_logits, dim=1) == source_label).item()
                         total_num += source_data.shape[0]
-                        train_accuracy = total_hit / total_num
 
-                        print('Training Stage:  Subject:{}  batch:{}    train acc: {:.6f}'
-                              .format(dataset_index, i, train_accuracy))
+
+                        # total_hit += torch.sum(torch.argmax(class_logits, dim=1) == source_label).item()
+                        # total_num += source_data.shape[0]
+                        # train_accuracy = total_hit / total_num
+                        #
+                        # print('Training Stage:  Subject:{}  batch:{}    train acc: {:.6f}'
+                        #       .format(dataset_index, i, train_accuracy))
 
                 else:
                     label_predictor.eval()
                     feature_extractor.eval()
-                    print('validation stage:\n')
+                    # print('\nvalidation stage:')
                     for i, ((source_data, source_label), (target_data, target_label)) in enumerate(
                             zip(source_train_dataloaders[phase][dataset_index], target_subject_valid_loader)):
                         source_data = source_data.cuda()  # [256, 1, 8, 52] (target_data 也是这个尺寸)
@@ -303,21 +317,74 @@ for target_subject_train_loader, target_subject_valid_loader in zip(list_target_
                         class_target_logits = label_predictor(feature_target)
 
                         # calculate loss
-                        loss_domain = domain_criterion(domain_source_logits, source_domain_label) \
-                                      + domain_criterion(domain_target_logits, target_domain_label)
+                        loss_domain = domain_criterion(domain_target_logits, target_domain_label) \
+                                      + domain_criterion(domain_source_logits, source_domain_label)
                         loss_class = class_criterion(class_source_logits, source_label)
                         loss = loss_class - lamb * loss_domain
 
-                        source_total_hit += torch.sum(torch.argmax(class_source_logits, dim=1) == source_label).item()
-                        source_total_num += source_data.shape[0]
-                        source_accuracy = source_total_hit / source_total_num
+                        # running_loss += loss
 
-                        target_total_hit += torch.sum(torch.argmax(class_target_logits, dim=1) == target_label).item()
-                        target_total_num += target_data.shape[0]
-                        target_accuracy = target_total_hit / target_total_num
+                        # batch_D_loss += loss_domain
+                        # batch_F_loss += loss
 
-                        print('{}   Loss:  {:.8f}   s_Acc:  {:.8f}  t_Acc:  {:.8}'
-                              .format(phase, loss, source_accuracy, target_accuracy))
+                        # source domain
+                        correct_source_over_batches += torch.sum(torch.argmax(class_source_logits, dim=1)
+                                                                 == source_label).item()
+                        total_source_num += source_data.shape[0]
+
+                        # target domain
+                        correct_target_over_batches += torch.sum(torch.argmax(class_target_logits, dim=1)
+                                                                 == target_label).item()
+                        total_target_num += target_data.shape[0]
+
+
+                        # source_total_hit += torch.sum(torch.argmax(class_source_logits, dim=1) == source_label).item()
+                        # source_total_num += source_data.shape[0]
+                        # source_accuracy = source_total_hit / source_total_num
+                        #
+                        # target_total_hit += torch.sum(torch.argmax(class_target_logits, dim=1) == target_label).item()
+                        # target_total_num += target_data.shape[0]
+                        # target_accuracy = target_total_hit / target_total_num
+                        #
+                        # print('{}   Loss:  {:.8f}   s_Acc:  {:.8f}  t_Acc:  {:.8}'
+                        #       .format(phase, loss, source_accuracy, target_accuracy))
+
+                # summarize epoch result
+                if phase == 'train':
+                    running_loss += loss_over_batches
+                    running_corrects += correct_over_batches
+                    running_total_num = total_num
+                    subject_loss = running_loss / running_total_num
+                    subject_acc = running_corrects / running_total_num
+
+                    print('{} phase  Subject:{}  Loss:{:.6f}  Acc:{:.4f}'
+                          .format(phase, dataset_index, subject_loss, subject_acc))
+
+                else:
+                    running_F_loss += batch_F_loss
+                    running_D_loss += batch_D_loss
+                    running_source_corrects += correct_source_over_batches
+                    running_target_corrects += correct_target_over_batches
+                    running_total_source_num = total_source_num
+                    running_total_target_num = total_target_num
+
+                    subject_F_loss = running_F_loss / (total_source_num + total_target_num)
+                    subject_D_loss = running_D_loss / (total_source_num + total_target_num)
+                    subject_source_acc = running_source_corrects / running_total_source_num
+                    subject_target_acc = running_target_corrects / running_total_target_num
+
+                    print('{} phase Subject:{}  F_Loss:{:.6f}  D_loss:{:.6f}  Source_Acc:{:.4}  Target_Acc:{:.4}'
+                          .format(phase, dataset_index, subject_F_loss, subject_D_loss, subject_source_acc, subject_target_acc))
+
+
+
+
+
+
+
+
+
+
 
                 # loss_over_datasets += loss
                 #
