@@ -7,6 +7,8 @@ from torch.autograd import Function
 
 import torchvision.transforms as transforms
 
+import time
+
 
 class ReverseLayerF(Function):
 
@@ -24,9 +26,9 @@ class ReverseLayerF(Function):
 
 
 # %% DaNN
-class DaNN_net(nn.Module):
+class DaNNet(nn.Module):
     def __init__(self, number_of_classes,):
-        super(DaNN_net, self).__init__()
+        super(DaNNet, self).__init__()
         self.feature = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=(3, 5)),
             nn.BatchNorm2d(32),
@@ -93,7 +95,7 @@ class DaNN_net(nn.Module):
 
 class FeatureExtractor(nn.Module):
 
-    def __init__(self, number_of_classes, ):
+    def __init__(self):
         super(FeatureExtractor, self).__init__()
         self.conv = nn.Sequential(
              nn.Conv2d(1, 32, kernel_size=(3, 5)),
@@ -154,6 +156,10 @@ class DomainClassifier(nn.Module):
         self.initialize_weights()
 
     def forward(self, feature_vector):
+        # print('shape of feature_vector: ', feature_vector.shape)
+        # time.sleep(1000)
+        # shape of feature vector: [512, 64, 4, 4]
+        feature_vector = feature_vector.view(-1, 1024)
         domain_label = self.layer(feature_vector)
         return domain_label
 
@@ -181,9 +187,8 @@ class LabelPredictor(nn.Module):
         self.initialize_weights()
 
     def forward(self, feature_vector):
-        output = self.layer(feature_vector)
-        flatten_tensor = output.view(-1, 1024)
-        class_label = self.fc(flatten_tensor)
+        feature_vector = feature_vector.view(-1, 1024)
+        class_label = self.layer(feature_vector)
         return class_label
 
     def initialize_weights(self):
@@ -206,7 +211,7 @@ if __name__ == '__main__':
     # print(label_predictor)
     # print(domain_classifier)
 
-    DaNN_net = DaNN_net(number_of_classes=10).cuda()
+    DaNN_net = DaNNet(number_of_classes=10).cuda()
     print(DaNN_net)
 
 
