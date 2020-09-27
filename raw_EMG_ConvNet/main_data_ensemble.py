@@ -130,7 +130,7 @@ for epoch in range(epoch_num):
     print('epoch: {} / {}'.format(epoch + 1, epoch_num))
     print('-' * 20)
 
-    train_D_loss, train_F_loss, train_src_acc = training(src_data_train, src_data_valid,
+    train_D_loss, train_F_loss, train_src_acc = training(src_data_train, target_data_training,
                                                          feature_extractor,
                                                          domain_classifier,
                                                          label_predictor,
