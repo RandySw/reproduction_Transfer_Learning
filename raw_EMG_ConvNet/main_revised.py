@@ -9,6 +9,7 @@ from torch.autograd import Variable
 
 import matplotlib.pyplot as plt
 
+
 import time
 import os
 import copy
@@ -17,23 +18,21 @@ from domain_adversarial_network import DaNNet
 from utliz import scramble, load_source_train_data, load_target_train_data, load_target_test_data
 
 
-def training(source_dataloader, target_dataloader, feature_extractor, domain_classifier, label_predictor,
-             optim_F, optim_C, optim_D, lamb=0.1):
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
-    running_D_loss, running_F_loss = 0.0, 0.0
+
+def training(source_dataloader, target_dataloader, net, optim, num_epoch, epoch=1):
+
+    running_loss = 0.0
     source_hit_num, total_num = 0.0, 0.0
 
-    feature_extractor.train()
-    domain_classifier.train()
-    label_predictor.train()
+    net.train()
 
     class_criterion = nn.CrossEntropyLoss()
     domain_criterion = nn.BCEWithLogitsLoss()
     len_dataloader = min(len(source_dataloader), len(target_dataloader))
 
-    optimizer_F = optim_F
-    optimizer_C = optim_C
-    optimizer_D = optim_D
+    optimizer = optim
 
     for i, ((source_data, source_label), (target_data, _)) in enumerate(zip(source_dataloader, target_dataloader)):
         if i > len_dataloader:
@@ -42,59 +41,48 @@ def training(source_dataloader, target_dataloader, feature_extractor, domain_cla
 
         source_data = source_data.cuda()  # [256, 1, 8, 52]
         source_label = source_label.cuda()
+
         target_data = target_data.cuda()
 
-        # 混合 source / target data
-        mixed_data = torch.cat([source_data, target_data], dim=0)  # [512, 1, 8, 52]
+        s_domain_labels = torch.ones([source_label.shape[0], 1]).cuda()
+        t_domain_labels = torch.zeros([target_data.shape[0], 1]).cuda()
 
-        domain_label = torch.zeros([source_data.shape[0] + target_data.shape[0], 1]).cuda()
-        # 设定 source data 的 label 是 1
-        domain_label[: source_data.shape[0]] = 1
+        p = float(i + epoch * len_dataloader) / num_epoch / len_dataloader
+        alpha = 2. / (1. + np.exp(-10 * p)) - 1
 
-        # train Domain Classifier
-        feature = feature_extractor(mixed_data)  # [512, 64, 4, 4]
-        domain_logits = domain_classifier(feature.detach())
-        loss = domain_criterion(domain_logits, domain_label)
-        running_D_loss += loss.item()  # 一定要使用.item() 将loss张量转化成float格式存储，不然显存会爆
+        # train with source data
+        s_class_output, s_domain_output = net(source_data, alpha=alpha)
 
-        loss.backward()
-        optimizer_D.step()
+        err_s_label = class_criterion(s_class_output, source_label)
+        err_s_domain = domain_criterion(s_domain_output, s_domain_labels)
 
-        # train Feature Extractor and Domain Classifier
-        class_logits = label_predictor(feature[:source_data.shape[0]])
-        domain_logits = domain_classifier(feature)
-        # loss 包括 source data 的 label loss 以及 source data 和 target data 的 domain loss
-        loss = class_criterion(class_logits, source_label) - lamb * domain_criterion(domain_logits,
-                                                                                     domain_label)
-        running_F_loss += loss.item()
+        # train with target data
+        _, t_domain_output = net(target_data, alpha=alpha)
+        err_t_domain = domain_criterion(t_domain_output, t_domain_labels)
 
-        loss.backward()
-        optimizer_F.step()
-        optimizer_C.step()
+        err = err_t_domain + err_s_domain + err_s_label
+        running_loss += err
 
-        optimizer_D.zero_grad()
-        optimizer_F.zero_grad()
-        optimizer_C.zero_grad()
+        net.zero_grad()
+        optimizer.zero_grad()
+        err.backward()
+        optimizer.step()
 
-        source_hit_num += torch.sum(torch.argmax(class_logits, dim=1) == source_label).item()
+        source_hit_num += torch.sum(torch.argmax(s_class_output, dim=1) == source_label).item()
         total_num += source_data.shape[0]
-        # print(i, end='\r')
 
-    dataloader_D_loss = running_D_loss / (i + 1)
-    dataloader_F_loss = running_F_loss / (i + 1)
-    dataloader_source_acc = source_hit_num / total_num
+    s_acc = source_hit_num / total_num
+    running_loss = running_loss / (i + 1)
 
-    return dataloader_D_loss, dataloader_F_loss, dataloader_source_acc
+    return running_loss, s_acc, alpha
 
 
-def validation(dataloader, feature_extractor, domain_classifier, label_predictor, domain='source'):
+def validation(dataloader, net, alpha=1, domain='source'):
 
-    running_D_loss, running_F_loss = 0.0, 0.0
+    running_D_loss, running_C_loss = 0.0, 0.0
     correct_pred_num, total_num = 0.0, 0.0
 
-    label_predictor.eval()
-    feature_extractor.eval()
-    domain_classifier.eval()
+    net.eval()
 
     class_criterion = nn.CrossEntropyLoss()
     domain_criterion = nn.BCEWithLogitsLoss()
@@ -107,42 +95,32 @@ def validation(dataloader, feature_extractor, domain_classifier, label_predictor
         elif domain == 'target':
             domain_labels = torch.zeros([data.shape[0], 1]).cuda()
 
-        feature = feature_extractor(data)
-
-        # get predicted domain and class labels
-        domain_logits = domain_classifier(feature)
-        class_logits = label_predictor(feature)
+        class_output, domain_output = net(data, alpha=alpha)
 
         # calculate loss
-        loss_domain = domain_criterion(domain_logits, domain_labels)
-        loss_class = class_criterion(class_logits, labels)
+        err_domain = domain_criterion(domain_output, domain_labels)
+        err_class = class_criterion(class_output, labels)
+        running_D_loss += err_domain.item()
+        running_C_loss += err_class.item()
 
         # calculate accuracy
-        correct_pred_num += torch.sum(torch.argmax(class_logits, dim=1) == labels).item()
+        correct_pred_num += torch.sum(torch.argmax(class_output, dim=1) == labels).item()
         total_num += data.shape[0]
-        # print(i, end='\r')
 
-        running_D_loss += loss_domain.item()
-        running_F_loss += loss_class.item()    # 仅包括分类损失
-        # print('batch_C_loss: ', loss_class.item())
-
-    dataloader_domain_loss = running_D_loss / (i + 1)
-    dataloader_class_loss = running_F_loss / (i + 1)
+    dataloader_D_loss = running_D_loss / (i + 1)
+    dataloader_C_loss = running_C_loss / (i + 1)
     dataloader_acc = correct_pred_num / total_num
-    # print('dataloader_C_loss: ,', dataloader_class_loss)
 
-    return dataloader_domain_loss, dataloader_class_loss, dataloader_acc
+    return dataloader_D_loss, dataloader_C_loss, dataloader_acc
 
 
-def testing(dataloader, feature_extractor, domain_classifier, label_predictor):
-    label_predictor.eval()
-    feature_extractor.eval()
-    domain_classifier.eval()
+def testing(dataloader, net, alpha=1):
+    net.eval()
 
     class_criterion = nn.CrossEntropyLoss()
     domain_criterion = nn.BCEWithLogitsLoss()
 
-    running_D_loss, running_F_loss = 0.0, 0.0
+    running_D_loss, running_C_loss = 0.0, 0.0
     correct_pred_num, total_num = 0.0, 0.0
 
     for i, (data, labels) in enumerate(dataloader):
@@ -150,28 +128,23 @@ def testing(dataloader, feature_extractor, domain_classifier, label_predictor):
         labels = labels.cuda()
         domain_labels = torch.zeros([data.shape[0], 1]).cuda()
 
-        feature = feature_extractor(data)
-
-        # get predicted domain and class labels
-        domain_logits = domain_classifier(feature)
-        class_logits = label_predictor(feature)
+        class_output, domain_output = net(data, alpha=alpha)
 
         # calculate loss
-        loss_domain = domain_criterion(domain_logits, domain_labels)
-        loss_class = class_criterion(class_logits, labels)
+        err_domain = domain_criterion(domain_output, domain_labels)
+        err_class = class_criterion(class_output, labels)
+        running_D_loss += err_domain.item()
+        running_C_loss += err_class.item()
 
         # calculate accuracy
-        correct_pred_num += torch.sum(torch.argmax(class_logits, dim=1) == labels).item()
+        correct_pred_num += torch.sum(torch.argmax(class_output, dim=1) == labels).item()
         total_num += data.shape[0]
 
-        running_D_loss += loss_domain.item()
-        running_F_loss += loss_class.item()    # 仅包括分类损失
-
-    dataloader_domain_loss = running_D_loss / (i + 1)
-    dataloader_class_loss = running_F_loss / (i + 1)
+    dataloader_D_loss = running_D_loss / (i + 1)
+    dataloader_C_loss = running_C_loss / (i + 1)
     dataloader_acc = correct_pred_num / total_num
 
-    return dataloader_domain_loss, dataloader_class_loss, dataloader_acc
+    return dataloader_D_loss, dataloader_C_loss, dataloader_acc
 
 
 torch.cuda.set_device(0)
@@ -238,18 +211,41 @@ tag_data_test1 = []
 for i in range(len(list_target_test1_dataloader)):
     tag_data_test1.extend(list_target_test1_dataloader[i])
 
+train_loss_cur = []
+train_acc_cur = []
+src_val_D_loss_cur = []
+src_val_C_loss_cur = []
+src_val_acc_cur = []
+tag_val_D_loss_cur = []
+tag_val_C_loss_cur = []
+tag_val_acc_cur = []
+tag_test0_D_loss_cur = []
+tag_test0_C_loss_cur = []
+tag_test0_acc_cur = []
+tag_test1_D_loss_cur = []
+tag_test1_C_loss_cur = []
+tag_test1_acc_cur = []
 
-net = DaNNet(number_of_classes=7)
 
-for p in net.parameters():
+Da_net = DaNNet(number_of_classes=7).cuda()
+
+for p in Da_net.parameters():
     p.requires_grad = True
 
-optimizer = optim.Adam(net.parameters(), lr=1e-3)
+precision = 1e-8
+
+optimizer = optim.Adam(Da_net.parameters(), lr=1.5e-3)
+
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=.1, patience=5,
+                                                 verbose=True, eps=precision)
 class_criterion = nn.CrossEntropyLoss()
 domain_criterion = nn.BCEWithLogitsLoss()
 
 # training
-epoch_num = 100
+epoch_num = 120
+patience = 12
+patience_increase = 12
+best_acc = 0
 
 for epoch in range(epoch_num):
     epoch_start_time = time.time()
@@ -258,74 +254,108 @@ for epoch in range(epoch_num):
     print('-' * 20)
 
     len_dataloader = min(len(src_data_train), len(tag_data_train))
-    data_source_iter = iter(src_data_train)
-    data_target_iter = iter(tag_data_train)
+    # train model with source data
 
-    i = 0
-    while i < len_dataloader:
-        p = float(i + epoch * len_dataloader) / epoch_num / len_dataloader
-        alpha = 2. / (1. + np.exp(-10 * p)) - 1
+    train_loss, train_acc, alpha = training(src_data_train, tag_data_train, Da_net, optimizer, epoch_num, epoch=epoch)
 
-        data_source = data_source_iter.next()
-        s_data, labels = data_source
+    src_valid_D_loss, src_valid_C_loss, src_valid_acc = validation(src_data_valid, net=Da_net, alpha=alpha)
 
-        net.zero_grad()
+    tag_valid_D_loss, tag_valid_C_loss, tag_valid_acc = validation(tag_data_valid, net=Da_net, alpha=alpha)
 
-        batch_size = len(labels)
-        domain_label = torch.zeros(batch_size)
-        domain_label = domain_label.long()
+    tag_test0_D_loss, tag_test0_C_loss, tag_test0_acc = testing(tag_data_test0, net=Da_net, alpha=alpha)
 
-        s_data = s_data.cuda()
-        labels = labels.cuda()
-        domain_label = domain_label.cuda()
+    tag_test1_D_loss, tag_test1_C_loss, tag_test1_acc = testing(tag_data_test1, net=Da_net, alpha=alpha)
 
-        class_output, domain_output = net(s_data, alpha=alpha)
-        err_s_label = class_criterion(class_output, labels)
-        err_s_domain = domain_criterion(domain_output, domain_label)
+    print('Training: Loss:{:.4f}  src_Acc:{:.4f}'.format(train_loss, train_acc))
+    print('Valid Source:  D_loss:{:.4f}  C_loss:{:.4f}  Acc:{:.4f}'
+          .format(src_valid_D_loss, src_valid_C_loss, src_valid_acc))
+    print('Valid Target:  D_loss:{:.4f}  C_loss:{:.4f}  Acc:{:.4f}'
+          .format(tag_valid_D_loss, tag_valid_C_loss, tag_valid_acc))
+    print('Test0:  D_loss:{:.4f}  C_loss:{:.4f}  Acc:{:.4f}'
+          .format(tag_test0_D_loss, tag_test0_C_loss, tag_test0_acc))
+    print('Test1:  D_loss:{:.4f}  C_loss:{:.4f}  Acc:{:.4f}'
+          .format(tag_test1_D_loss, tag_test1_C_loss, tag_test1_acc))
+    print('epoch time usage: {:.2f}s'.format(time.time() - epoch_start_time))
 
-        # training model using target data
-        data_target = data_target_iter.next()
-        t_data, _ = data_target
+    scheduler.step(train_loss)
 
-        batch_size = len(t_data)
+    if tag_valid_acc + precision > best_acc:
+        print('New Best Target Validation Accuracy: {:.4f}'.format(tag_valid_acc))
+        best_acc = tag_valid_acc
+        best_weights = copy.deepcopy(Da_net.state_dict())
+        patience = patience_increase + epoch
+        print('So Far Patience: ', patience)
+    print()
 
-        domain_label = torch.ones(batch_size)
-        domain_label = domain_label.long()
+    # collecting results
+    train_loss_cur.append(train_loss)
+    train_acc_cur.append(train_acc)
+    src_val_D_loss_cur.append(src_valid_D_loss)
+    src_val_C_loss_cur.append(src_valid_C_loss)
+    src_val_acc_cur.append(src_valid_acc)
+    tag_val_D_loss_cur.append(tag_valid_D_loss)
+    tag_val_C_loss_cur.append(tag_valid_C_loss)
+    tag_val_acc_cur.append(tag_valid_acc)
+    tag_test0_D_loss_cur.append(tag_test0_D_loss)
+    tag_test0_C_loss_cur.append(tag_test0_C_loss)
+    tag_test0_acc_cur.append(tag_test0_acc)
+    tag_test1_D_loss_cur.append(tag_test1_D_loss)
+    tag_test1_C_loss_cur.append(tag_test1_C_loss)
+    tag_test1_acc_cur.append(tag_test1_acc)
 
-        t_data = t_data.cuda()
-        domain_label = domain_label.cuda()
+    if epoch > patience:
+        break
 
-        _, domain_output = net(t_data, alpha=alpha)
-        err_t_domain = domain_criterion(domain_output, domain_label)
-        err = err_t_domain + err_s_domain + err_s_label
+print('-' * 20 + '\n' + '-' * 20)
+print('Best Best Target Validation Accuracy: {:.4f}'.format(best_acc))
 
-        err.backward()
-        optimizer.step()
+# Loss curve
+plt.plot(train_loss_cur)
+plt.title('Training Loss - Epoch')
+plt.legend(['train_loss'])
+plt.xlabel('Epoch')
+plt.ylabel('Training Loss')
+plt.show()
 
-        i += 1
+plt.plot(src_val_D_loss_cur)
+plt.plot(tag_val_D_loss_cur)
+plt.plot(tag_test0_D_loss_cur)
+plt.plot(tag_test1_D_loss_cur)
+plt.title('Domain Loss - Epoch')
+plt.legend(['src_val_D_loss', 'tag_val_D_loss', 'tag_test0_D_loss', 'tag_test1_D_loss'])
+plt.xlabel('Epoch')
+plt.ylabel('Domain Loss')
+plt.show()
 
-        print('epoch: %d, [iter: %d / all %d], err_s_label: %f, err_s_domain: %f, err_t_domain: %f' \
-              % (epoch, i, len_dataloader, err_s_label.data.cpu().numpy(),
-                 err_s_domain.data.cpu().numpy(), err_t_domain.data.cpu().item()))
+plt.plot(src_val_C_loss_cur)
+plt.plot(tag_val_C_loss_cur)
+plt.plot(tag_test0_C_loss_cur)
+plt.plot(tag_test1_C_loss_cur)
+plt.title('Classification Loss - Epoch')
+plt.legend(['src_val_C_loss', 'tag_val_C_loss', 'tag_test0_C_loss', 'tag_test1_C_loss'])
+plt.xlabel('Epoch')
+plt.ylabel('Classification Loss')
+plt.show()
+
+plt.plot(train_acc_cur)
+plt.plot(src_val_acc_cur)
+plt.plot(tag_val_acc_cur)
+plt.plot(tag_test0_acc_cur)
+plt.plot(tag_test1_acc_cur)
+plt.title('Classification Accuracy - Epoch')
+plt.legend(['train_acc', 'src_val_acc', 'tag_val_acc', 'tag_test0_acc', 'tag_test1_acc'])
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.show()
 
 
-print('done')
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # ToDo:
+    # dropout rate
+    # 收集每次epoch结果数据绘制曲线
+    # 尝试单人target
 
 
 
