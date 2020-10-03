@@ -48,19 +48,19 @@ class DaNNet(nn.Module):
         self.domain_classifier = nn.Sequential(
             nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(),
+            nn.PReLU(512),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(),
+            nn.PReLU(512),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(),
+            nn.PReLU(512),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(),
+            nn.PReLU(512),
 
             nn.Linear(512, 1),
         )
@@ -81,7 +81,64 @@ class DaNNet(nn.Module):
         feature = feature.view(-1, 1024)
         reverse_feature = ReverseLayerF.apply(feature, alpha)
         class_output = self.label_classifier(feature)
-        domain_output = self.domain_classifier(feature)
+        domain_output = self.domain_classifier(reverse_feature)
+        return class_output, domain_output
+
+    def initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.Linear):
+                torch.nn.init.kaiming_normal_(m.weight)
+                m.bias.data.zero_()
+
+
+class LeNet5(nn.Module):
+    def __init__(self, num_of_classes):
+        super(LeNet5, self).__init__()
+
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=(3, 5)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 3)),
+
+            nn.Conv2d(32, 64, kernel_size=(3, 5)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 3)),
+        )
+
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+
+            nn.Linear(512, 1),
+        )
+
+        self.label_predictor = nn.Sequential(
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+
+            nn.Linear(1024, num_of_classes),
+        )
+
+        self.initialize_weights()
+
+    def forward(self, input_data, alpha):
+        feature = self.feature(input_data)
+        feature = feature.view(-1, 1024)
+        reverse_feature = ReverseLayerF.apply(feature, alpha)
+        class_output = self.label_classifier(feature)
+        domain_output = self.domain_classifier(reverse_feature)
+        return class_output, domain_output
 
     def initialize_weights(self):
         for m in self.modules():

@@ -43,6 +43,7 @@ def training(source_dataloader, target_dataloader, net, optim, num_epoch, epoch=
         source_label = source_label.cuda()
 
         target_data = target_data.cuda()
+        # target_label = target_label.cuda()
 
         s_domain_labels = torch.ones([source_label.shape[0], 1]).cuda()
         t_domain_labels = torch.zeros([target_data.shape[0], 1]).cuda()
@@ -57,8 +58,9 @@ def training(source_dataloader, target_dataloader, net, optim, num_epoch, epoch=
         err_s_domain = domain_criterion(s_domain_output, s_domain_labels)
 
         # train with target data
-        _, t_domain_output = net(target_data, alpha=alpha)
+        t_class_output, t_domain_output = net(target_data, alpha=alpha)
         err_t_domain = domain_criterion(t_domain_output, t_domain_labels)
+        # err_t_class = class_criterion(t_class_output, target_label)
 
         err = err_t_domain + err_s_domain + err_s_label
         running_loss += err
@@ -194,13 +196,12 @@ for i in range(len(list_source_valid_dataloader)):
 
 tag_data_train = []
 for i in range(len(list_target_train_dataloader)):
-    # i = 0
     tag_data_train.extend(list_target_train_dataloader[i])
 
 tag_data_valid = []
 for i in range(len(list_target_valid_dataloader)):
-    # i = 0
     tag_data_valid.extend(list_target_valid_dataloader[i])
+# tag_data_valid.extend(list_target_valid_dataloader[0])
 
 tag_data_test0 = []
 for i in range(len(list_target_test0_dataloader)):
@@ -210,6 +211,7 @@ for i in range(len(list_target_test0_dataloader)):
 tag_data_test1 = []
 for i in range(len(list_target_test1_dataloader)):
     tag_data_test1.extend(list_target_test1_dataloader[i])
+# tag_data_test1.extend(list_target_test1_dataloader[0])
 
 train_loss_cur = []
 train_acc_cur = []
@@ -234,9 +236,11 @@ for p in Da_net.parameters():
 
 precision = 1e-8
 
-optimizer = optim.Adam(Da_net.parameters(), lr=1.5e-3)
+optimizer = optim.Adam(Da_net.parameters(), lr=1e-3)
+# optimizer = optim.SGD(Da_net.parameters(), momentum=0.1, lr=1e-3)
+# optimizer = optim.SGD(Da_net.parameters(), lr=1e-3)
 
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=.1, patience=5,
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=5,
                                                  verbose=True, eps=precision)
 class_criterion = nn.CrossEntropyLoss()
 domain_criterion = nn.BCEWithLogitsLoss()
@@ -246,6 +250,7 @@ epoch_num = 120
 patience = 12
 patience_increase = 12
 best_acc = 0
+best_loss = float('inf')
 
 for epoch in range(epoch_num):
     epoch_start_time = time.time()
@@ -253,7 +258,6 @@ for epoch in range(epoch_num):
     print('epoch: {} / {}'.format(epoch + 1, epoch_num))
     print('-' * 20)
 
-    len_dataloader = min(len(src_data_train), len(tag_data_train))
     # train model with source data
 
     train_loss, train_acc, alpha = training(src_data_train, tag_data_train, Da_net, optimizer, epoch_num, epoch=epoch)
@@ -279,9 +283,19 @@ for epoch in range(epoch_num):
 
     scheduler.step(train_loss)
 
-    if tag_valid_acc + precision > best_acc:
-        print('New Best Target Validation Accuracy: {:.4f}'.format(tag_valid_acc))
-        best_acc = tag_valid_acc
+    val_loss = tag_valid_D_loss + src_valid_C_loss + src_valid_D_loss
+
+    # if tag_valid_acc + precision > best_acc:
+    #     print('New Best Target Validation Accuracy: {:.4f}'.format(tag_valid_acc))
+    #     best_acc = tag_valid_acc
+    #     best_weights = copy.deepcopy(Da_net.state_dict())
+    #     patience = patience_increase + epoch
+    #     print('So Far Patience: ', patience)
+    # print()
+
+    if val_loss + precision < best_loss:
+        print('New Best Validation Loss: {:.4f}'.format(val_loss))
+        best_loss = val_loss
         best_weights = copy.deepcopy(Da_net.state_dict())
         patience = patience_increase + epoch
         print('So Far Patience: ', patience)
@@ -347,16 +361,6 @@ plt.legend(['train_acc', 'src_val_acc', 'tag_val_acc', 'tag_test0_acc', 'tag_tes
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.show()
-
-
-
-
-
-    # ToDo:
-    # dropout rate
-    # 收集每次epoch结果数据绘制曲线
-    # 尝试单人target
-
 
 
 
