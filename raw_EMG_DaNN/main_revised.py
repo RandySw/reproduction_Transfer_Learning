@@ -236,7 +236,7 @@ for p in Da_net.parameters():
 
 precision = 1e-8
 
-optimizer = optim.Adam(Da_net.parameters(), lr=1e-3)
+optimizer = optim.Adam(Da_net.parameters(), lr=2e-4)
 # optimizer = optim.SGD(Da_net.parameters(), momentum=0.1, lr=1e-3)
 # optimizer = optim.SGD(Da_net.parameters(), lr=1e-3)
 
@@ -247,8 +247,8 @@ domain_criterion = nn.BCEWithLogitsLoss()
 
 # training
 epoch_num = 120
-patience = 12
-patience_increase = 12
+patience = 20
+patience_increase = 20
 best_acc = 0
 best_loss = float('inf')
 
@@ -283,7 +283,7 @@ for epoch in range(epoch_num):
 
     scheduler.step(train_loss)
 
-    val_loss = tag_valid_D_loss + src_valid_C_loss + src_valid_D_loss
+    # val_loss = tag_valid_D_loss + src_valid_C_loss + src_valid_D_loss
 
     # if tag_valid_acc + precision > best_acc:
     #     print('New Best Target Validation Accuracy: {:.4f}'.format(tag_valid_acc))
@@ -293,9 +293,9 @@ for epoch in range(epoch_num):
     #     print('So Far Patience: ', patience)
     # print()
 
-    if val_loss + precision < best_loss:
-        print('New Best Validation Loss: {:.4f}'.format(val_loss))
-        best_loss = val_loss
+    if train_loss + precision < best_loss:
+        print('New Best Validation Loss: {:.4f}'.format(train_loss))
+        best_loss = train_loss
         best_weights = copy.deepcopy(Da_net.state_dict())
         patience = patience_increase + epoch
         print('So Far Patience: ', patience)
@@ -321,7 +321,8 @@ for epoch in range(epoch_num):
         break
 
 print('-' * 20 + '\n' + '-' * 20)
-print('Best Best Target Validation Accuracy: {:.4f}'.format(best_acc))
+# print('Best Best Target Validation Accuracy: {:.4f}'.format(best_acc))
+print('Best Best Validation Loss: {:.4f}'.format(best_loss))
 
 # Loss curve
 plt.plot(train_loss_cur)

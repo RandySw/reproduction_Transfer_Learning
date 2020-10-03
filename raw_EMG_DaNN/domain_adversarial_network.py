@@ -49,18 +49,23 @@ class DaNNet(nn.Module):
             nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
             nn.PReLU(512),
+            nn.Dropout(0.5),
+
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.PReLU(512),
+            nn.Dropout(0.5),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.PReLU(512),
+            nn.Dropout(0.5),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.PReLU(512),
+            nn.Dropout(0.5),
 
             nn.Linear(512, 1),
         )
