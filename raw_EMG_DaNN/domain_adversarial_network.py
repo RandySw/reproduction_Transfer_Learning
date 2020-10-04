@@ -1,13 +1,6 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.autograd import Function
-
-import torchvision.transforms as transforms
-
-import time
 
 
 class ReverseLayerF(Function):
@@ -48,24 +41,24 @@ class DaNNet(nn.Module):
         self.domain_classifier = nn.Sequential(
             nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(512),
-            nn.Dropout(0.5),
+            nn.PReLU(),
+            # nn.Dropout(0.5),
 
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(512),
-            nn.Dropout(0.5),
+            nn.PReLU(),
+            # nn.Dropout(0.5),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(512),
-            nn.Dropout(0.5),
+            nn.PReLU(),
+            # nn.Dropout(0.5),
 
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
-            nn.PReLU(512),
-            nn.Dropout(0.5),
+            nn.PReLU(),
+            # nn.Dropout(0.5),
 
             nn.Linear(512, 1),
         )
