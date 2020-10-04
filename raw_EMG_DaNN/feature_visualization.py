@@ -89,8 +89,8 @@ class DaNNet(nn.Module):
         feature = self.feature(input_data)
         feature = feature.view(-1, 1024)
         reverse_feature = ReverseLayerF.apply(feature, alpha)
-        class_output = self.label_classifier(reverse_feature)
-        domain_output = self.domain_classifier(feature)
+        class_output = self.label_classifier(feature)
+        domain_output = self.domain_classifier(reverse_feature)
         return class_output, domain_output, feature
 
     def initialize_weights(self):
@@ -272,20 +272,23 @@ for p in Da_net.parameters():
 
 precision = 1e-8
 
-optimizer = optim.Adam(Da_net.parameters(), lr=1.5e-3)
+optimizer = optim.Adam(Da_net.parameters(), lr=2e-4)
+# optimizer = optim.SGD(Da_net.parameters(), momentum=0.5, lr=2e-4)
+# optimizer = optim.SGD(Da_net.parameters(), lr=1e-3)
 
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=.1, patience=5,
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=5,
                                                  verbose=True, eps=precision)
 class_criterion = nn.CrossEntropyLoss()
 domain_criterion = nn.BCEWithLogitsLoss()
 
 # training
-epoch_num = 11
-patience = 12
-patience_increase = 12
+epoch_num = 120
+patience = 20
+patience_increase = 20
 best_acc = 0
+best_loss = float('inf')
 
-record_index = [0, 30, 45, 60, 75, 90, 105]
+record_index = [0, 15, 30, 45, 60, 75, 90]
 feature_vectors_s_train = []
 feature_vectors_t_train = []
 feature_vectors_s_val = []
@@ -318,21 +321,31 @@ for epoch in range(epoch_num):
 
     print('epoch time usage: {:.2f}s'.format(time.time() - epoch_start_time))
 
-    scheduler.step(train_loss)
+    val_loss = tag_valid_D_loss + src_valid_C_loss + src_valid_D_loss
+
+    scheduler.step(val_loss)
+
+    # if tag_valid_acc + precision > best_acc:
+    #     print('New Best Target Validation Accuracy: {:.4f}'.format(tag_valid_acc))
+    #     best_acc = tag_valid_acc
+    #     best_weights = copy.deepcopy(Da_net.state_dict())
+    #     patience = patience_increase + epoch
+    #     print('So Far Patience: ', patience)
+    # print()
+
+    if val_loss + precision < best_loss:
+        print('New Best Validation Loss: {:.4f}'.format(val_loss))
+        best_loss = val_loss
+        best_weights = copy.deepcopy(Da_net.state_dict())
+        patience = patience_increase + epoch
+        print('So Far Patience: ', patience)
+    print()
 
     if epoch in record_index:
         feature_vectors_s_train.append(src_feature_train_container)
         feature_vectors_t_train.append(tag_feature_train_container)
         feature_vectors_s_val.append(src_feature_val_container)
         feature_vectors_t_val.append(tag_feature_val_container)
-
-    if tag_valid_acc + precision > best_acc:
-        print('New Best Target Validation Accuracy: {:.4f}'.format(tag_valid_acc))
-        best_acc = tag_valid_acc
-        best_weights = copy.deepcopy(Da_net.state_dict())
-        patience = patience_increase + epoch
-        print('So Far Patience: ', patience)
-    print()
 
     if epoch > patience:
         break
@@ -343,14 +356,32 @@ print('Best Best Target Validation Accuracy: {:.4f}'.format(best_acc))
 # feature visualization
 # for index in range(len(feature_vectors_s_train)):
 
-index = 1
-X = feature_vectors_s_train[index][:300]    # 300: 样本数目
-tsne = manifold.TSNE(n_components=2, init='pca', random_state=0)
-X_tsne = tsne.fit_transform(X)
+# index = 1
+# X = feature_vectors_s_train[index][:300]    # 300: 样本数目
+# tsne = manifold.TSNE(n_components=2, init='pca', random_state=0)
+# X_tsne = tsne.fit_transform(X)
+#
+# x_min, x_max = X_tsne.min(0), X_tsne.max(0)
+# X_norm = (X_tsne - x_min) / (x_max - x_min)
+# plt.scatter(X_tsne[:10, 0], X_tsne[:10, 1])
+# plt.show()
 
-x_min, x_max = X_tsne.min(0), X_tsne.max(0)
-X_norm = (X_tsne - x_min) / (x_max - x_min)
-plt.scatter(X_tsne[:10, 0], X_tsne[:10, 1])
+
+iter_time = len(feature_vectors_s_train)
+
+print('Start t-SNE analysis...')
+for i in range(iter_time):
+    X = feature_vectors_s_train[i][:6000]
+    tsne = manifold.TSNE(n_components=2, init='pca', random_state=42)
+    X_tsne = tsne.fit_transform(X)
+    x_min, x_max = X_tsne.min(0), X_tsne.max(0)
+    X_norm = (X_tsne - x_min) / (x_max - x_min)
+
+    plt.subplot(1, iter_time, i)
+    plt.scatter(X_tsne[:6000, 0], X_tsne[:6000, 1])
+    plt.title('src_train: {} epoch'.format(record_index[i]))
+    plt.xlabel('t-SNE feature1')
+    plt.xlabel('t-SNE feature2')
 plt.show()
 
 
