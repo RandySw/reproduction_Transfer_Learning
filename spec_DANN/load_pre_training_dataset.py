@@ -8,6 +8,9 @@ size_non_overlap = 5
 
 
 def format_data_to_train(vector_to_format):
+    """
+    输入的是单个手势的肌电信号样本 -> 一维的
+    """
     dataset_example_formatted = []
     example = []
     emg_vector = []
@@ -17,15 +20,16 @@ def format_data_to_train(vector_to_format):
             if (example == []):
                 example = emg_vector
             else:
-                example = np.row_stack((example, emg_vector))
+                example = np.row_stack((example, emg_vector))   # 按行拼接
             emg_vector = []
             if (len(example) >= number_of_vector_per_example):
-                example = example.transpose()
-                dataset_example_formatted.append(example)
+                example = example.transpose()   # example (8, 52)
+                dataset_example_formatted.append(example)   # dataset_example_formatted <list> (189, (8, 52))
                 example = example.transpose()
                 example = example[size_non_overlap:]
     test = cal_spectrogram.calculate_spectrogram_dataset(dataset_example_formatted)
-    return np.array(test)
+    test = np.array(test)   # test (189, 4, 8, 14)
+    return test
 
 
 def shift_electrodes(examples, labels):
@@ -109,7 +113,6 @@ def read_data(path):
         labels = []
         examples = []
         for i in range(number_of_classes * 4):
-            i=0     # szy: 这句什么鬼？？？？ -> 对每个female 重复加载其第一个样本27次 而不是读取其所有的27个样本
             data_read_from_file = np.fromfile(path + '/Female' + str(candidate) + '/training0/classe_%d.dat' % i,
                                               dtype=np.int16)
             data_read_from_file = np.array(data_read_from_file, dtype=np.float32)
@@ -127,10 +130,10 @@ def read_data(path):
 
 
 if __name__ == '__main__':
-    examples, labels = read_data('../../PreTrainingDataset')  # 加载数据集
-    datasets = [examples, labels]
-
-    np.save("formatted_datasets/saved_pre_training_dataset_spectrogram.npy", datasets)
+    # examples, labels = read_data('../../PreTrainingDataset')  # 加载数据集
+    # datasets = [examples, labels]
+    #
+    # np.save("formatted_datasets/saved_pre_training_dataset_spectrogram.npy", datasets)
 
     datasets_pre_training = np.load("formatted_datasets/saved_pre_training_dataset_spectrogram.npy",
                                     encoding="bytes", allow_pickle=True)
