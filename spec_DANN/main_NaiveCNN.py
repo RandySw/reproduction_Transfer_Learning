@@ -1,9 +1,4 @@
 """
-使用 ANN 作非TL方法的识别性能对照实验
-    ANN:
-        Input layer: <input_size: 448>
-        Hidden layer: <512>
-        Output layerL <output_size: 7>
 
 
 """
@@ -22,10 +17,7 @@ import collections
 import copy
 import data_process
 
-from model import ANN
-
-
-# --------------------------------- Data Pre-process --------------------------------------- #
+from model import NaiveCNN
 
 
 train_dataset = np.load('formatted_datasets/saved_total_users_train_dataset_xu_8_subjects.npy',
@@ -103,88 +95,102 @@ test_data = TensorDataset(torch.from_numpy(test_data),
 train_dataloader = DataLoader(train_data, batch_size=1024, shuffle=True, drop_last=True)
 test_dataloader = DataLoader(test_data, batch_size=1024, shuffle=True, drop_last=True)
 
-# ----------------------------------------- Training & Validation ----------------------------------------- #
+# -------------------------------------- Training Stage ------------------------------------------- #
+
+net = NaiveCNN().cuda()
+
+for p in net.parameters():
+    p.requires_grad = True
 
 precision = 1e-8
-ann = ANN(input_channel=448, number_of_classes=7).cuda()
+
 class_criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(ann.parameters(), lr=1e-3)
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=6,
+domain_criterion = nn.CrossEntropyLoss()
+
+optimizer = optim.Adam(net.parameters())
+
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.1, patience=8,
                                                  verbose=True, eps=precision)
 
-epoch_num = 120
-patience = 12
-patience_increase = 12
+epoch_num = 200   # 120
+patience = 15   # 12
+patience_increase = 15  # 12
+best_acc = 0
 best_loss = float('inf')
 
 for epoch in range(epoch_num):
+
     epoch_start_time = time.time()
     print('epoch: {} / {}'.format(epoch + 1, epoch_num))
     print('-' * 20)
 
-    running_loss = 0.
-    correct_gesture_label, total_num = 0.0, 0.0
+    len_dataloader = len(train_dataloader)
 
-    # training
-    ann.train()
+    running_loss, total_num, correct_gesture_label = 0.0, 0.0, 0.0
+
+    net.train()
+
     for i, (data, gesture_label, subject_label) in enumerate(train_dataloader):
-        data = data.cuda()  # torch.Size([1024, 4, 8, 14])
+        data = data.cuda()                      # torch.Size([1024, 4, 8, 14])
         # print(data.shape)
-        gesture_label = gesture_label.cuda()  # torch.Size([1024])     1024
+        gesture_label = gesture_label.cuda()    # torch.Size([1024])     1024
 
-        data = data.view(1024, -1)              # torch.Size([1024, 448]) -> 每个样本变为一维向量 适配ANN的输入
-        # print(data.shape)
-        # time.sleep(100)
-
-        pred_gesture_label = ann(data)
-        loss = class_criterion(pred_gesture_label, gesture_label)
+        pred_label = net(data)
+        loss = class_criterion(pred_label, gesture_label)
         running_loss += loss.item()
         loss.backward()
         optimizer.step()
 
-        correct_gesture_label += torch.sum(torch.argmax(pred_gesture_label, dim=1) == gesture_label).item()
+        optimizer.zero_grad()
+
+        correct_gesture_label += torch.sum(torch.argmax(pred_label, dim=1) == gesture_label).item()
         total_num += data.shape[0]
 
-    total_acc = correct_gesture_label / total_num
-    total_loss = running_loss / (i + 1)
-    print('Train:   Loss: {:.4f}   Acc: {:.4f}'.format(total_loss, total_acc))
+    gesture_acc = correct_gesture_label / total_num
+    epoch_loss = running_loss / (i + 1)
+    print('Train:   Accuracy: {:.4f}    Epoch Loss: {:.4f}'.format(gesture_acc, epoch_loss))
 
-    # validation
-    running_loss = 0.
-    correct_gesture_label, total_num = 0.0, 0.0
 
-    ann.eval()
+# validation
+    running_loss, total_num, correct_gesture_label = 0.0, 0.0, 0.0
+    net.eval()
+
     for i, (data, gesture_label, subject_label) in enumerate(test_dataloader):
-        data = data.cuda()  # torch.Size([1024, 4, 8, 14])
+        data = data.cuda()                      # torch.Size([512, 4, 8, 14])
         # print(data.shape)
-        gesture_label = gesture_label.cuda()  # torch.Size([1024])     1024
+        gesture_label = gesture_label.cuda()    # torch.Size([512])
 
-        data = data.view(1024, -1)              # torch.Size([1024, 448]) -> 每个样本变为一维向量 适配ANN的输入
-        # print(data.shape)
-        # time.sleep(100)
-
-        pred_gesture_label = ann(data)
-        loss = class_criterion(pred_gesture_label, gesture_label)
+        pred_label = net(data)
+        loss = class_criterion(pred_label, gesture_label)
         running_loss += loss.item()
 
-        correct_gesture_label += torch.sum(torch.argmax(pred_gesture_label, dim=1) == gesture_label).item()
+        correct_gesture_label += torch.sum(torch.argmax(pred_label, dim=1) == gesture_label).item()
         total_num += data.shape[0]
 
-    valid_acc = correct_gesture_label / total_num
-    valid_loss = running_loss / (i + 1)
+    gesture_acc = correct_gesture_label / total_num
+    epoch_val_loss = running_loss / (i + 1)
+    print('Valid:   Accuracy: {:.4f}    Epoch Loss: {:.4f}'.format(gesture_acc, epoch_val_loss))
 
-    print('Valid:   Loss: {:.4f}   Acc: {:.4f}'.format(valid_loss, valid_acc))
-    print('Time usage: {:.2f}s'.format(time.time() - epoch_start_time))
-    print()
+    print('Time Usage:  {:.2f}s'.format(time.time() - epoch_start_time))
 
-    scheduler.step(valid_loss)
-    if valid_loss + precision < best_loss:
-        print('New best validation loss: {:.4f}'.format(valid_loss))
-        best_loss = valid_loss
-        best_weights = copy.deepcopy(ann.state_dict())
+    scheduler.step(epoch_val_loss)
+
+    if epoch_val_loss + precision < best_loss:
+        print('New best validation loss:    {:.4f}'.format(epoch_val_loss))
+        best_loss = epoch_val_loss
+        best_weights = copy.deepcopy(net.state_dict())
         patience = patience_increase + epoch
         print('So Far Patience: ', patience)
 
+    print()
 
-torch.save(best_weights, r'saved_model\ANN_8_subjects.pkl')
+# save model
+torch.save(best_weights, r'saved_model\naive_cnn.pkl')
+print('Model Saved')
+
+
+
+
+
+
 
